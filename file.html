@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF Studio – 3D Annotation & Layout Segmentation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{--bg:#0d1117;--p1:#151b23;--p2:#1c2430;--ln:#2a3544;--tx:#e6edf3;--mu:#8b9bad;--ac:#2ec4d6;--red:#ff4d4f;--blue:#3b82f6;--green:#22c55e}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-family:Inter,system-ui,sans-serif}
+button,select,input{font:inherit;color:var(--tx)}
+button{background:var(--p2);border:1px solid var(--ln);border-radius:8px;padding:8px 10px;cursor:pointer;display:flex;align-items:center;gap:8px;width:100%}
+button:hover{border-color:var(--ac)}button.on{background:var(--ac);color:#04161a;border-color:var(--ac);font-weight:600}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+select{background:var(--p2);border:1px solid var(--ln);border-radius:8px;padding:7px;width:100%}
+#c3d{position:fixed;inset:0;width:100%;height:100%;display:block}
+#intro{position:fixed;inset:0;z-index:5;transition:opacity 1s;pointer-events:none}
+#intro .hint{position:absolute;left:50%;bottom:10%;transform:translateX(-50%);text-align:center;background:rgba(10,15,25,.65);padding:14px 22px;border-radius:12px;border:1px solid var(--ln);pointer-events:auto}
+#intro .hint b{font-size:20px;display:block;margin-bottom:4px}
+#intro .hint span{color:var(--mu);font-size:14px}
+#arrive{display:none;width:auto;margin:10px auto 0;padding:10px 18px;background:var(--ac);color:#04161a;font-weight:600}
+#studio{position:fixed;inset:0;display:none;grid-template-columns:250px 1fr 310px;opacity:0;transition:opacity 1s;background:var(--bg)}
+aside{background:var(--p1);padding:14px;overflow:auto;display:flex;flex-direction:column;gap:10px}
+#left{border-right:1px solid var(--ln)}#right{border-left:1px solid var(--ln)}
+h3{margin:8px 0 2px;font-size:12px;font-weight:600;color:var(--mu);letter-spacing:.02em}
+.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}
+input[type=color]{padding:0;height:34px;border:1px solid var(--ln);border-radius:8px;background:none}
+input[type=range]{width:100%;accent-color:var(--ac)}
+label.chk{display:flex;gap:8px;align-items:center;color:var(--mu);font-size:14px}
+#center{display:grid;grid-template-rows:auto 1fr;min-width:0}
+.top{display:flex;gap:8px;align-items:center;padding:8px 12px;background:var(--p1);border-bottom:1px solid var(--ln)}
+.top button{width:auto}.top span{min-width:90px;text-align:center;font-size:14px;color:var(--mu)}
+#vp{overflow:auto;padding:24px;text-align:center}
+#stack{position:relative;display:inline-block;background:#fff;box-shadow:0 6px 30px rgba(0,0,0,.6)}
+#stack canvas{display:block}#sg,#an{position:absolute;left:0;top:0}#sg{pointer-events:none}#an{touch-action:none;cursor:crosshair}
+.seg{border:1px solid var(--ln);border-left:4px solid;border-radius:8px;padding:8px;background:var(--p2);font-size:13px;cursor:pointer}
+.seg.sel{outline:2px solid var(--ac)}.seg small{color:var(--mu);display:block;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seg .h{display:flex;justify-content:space-between;align-items:center;font-weight:600}
+.seg .h button{width:auto;padding:3px 8px;font-size:12px}
+.empty{color:var(--mu);font-size:14px}
+#toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#3a1418;border:1px solid var(--red);padding:10px 16px;border-radius:8px;z-index:20;display:none;max-width:90vw}
+@media(max-width:900px){#studio{grid-template-columns:1fr}aside{display:none}}
+</style>
+</head>
+<body>
+<canvas id="c3d"></canvas>
+<div id="intro">
+  <div class="hint"><b>Welcome home</b><span id="hintTxt">Click anywhere to walk to the PDF terminal</span>
+    <button id="arrive"><i class="fa-solid fa-file-pdf"></i> Select a PDF</button></div>
+</div>
+<input type="file" id="file" accept="application/pdf" hidden>
+<div id="toast" role="alert"></div>
+ 
+<div id="studio">
+  <aside id="left">
+    <h3>Mode</h3>
+    <button class="tool on" data-t="pen"><i class="fa-solid fa-pen fa-fw"></i>Freehand pen</button>
+    <button class="tool" data-t="hl"><i class="fa-solid fa-highlighter fa-fw"></i>Text highlighter</button>
+    <button class="tool" data-t="redact"><i class="fa-solid fa-square fa-fw"></i>Redact</button>
+    <button class="tool" data-t="stamp"><i class="fa-solid fa-stamp fa-fw"></i>Stamp</button>
+    <button class="tool" data-t="erase"><i class="fa-solid fa-eraser fa-fw"></i>Eraser</button>
+    <h3>Brush</h3>
+    <input type="color" id="color" value="#ff4d4f" aria-label="Stroke colour">
+    <label class="chk">Width <input type="range" id="size" min="1" max="30" value="4"></label>
+    <select id="stamp"><option>APPROVED</option><option>CONFIDENTIAL</option><option>REJECTED</option><option>DRAFT</option><option>REVIEWED</option></select>
+    <h3>Layers</h3>
+    <label class="chk"><input type="checkbox" id="showSeg" checked>Show segments</label>
+    <div class="row"><button id="undo"><i class="fa-solid fa-rotate-left"></i>Undo</button><button id="clear"><i class="fa-solid fa-trash"></i>Clear</button></div>
+    <h3>Export</h3>
+    <button id="exPng"><i class="fa-solid fa-image fa-fw"></i>Flattened PNG</button>
+    <button id="exPdf"><i class="fa-solid fa-file-pdf fa-fw"></i>Flattened PDF</button>
+    <button id="exCsv"><i class="fa-solid fa-table fa-fw"></i>Tables to CSV</button>
+    <button id="newf"><i class="fa-solid fa-folder-open fa-fw"></i>Open another PDF</button>
+  </aside>
+  <div id="center">
+    <div class="top">
+      <button id="prev" aria-label="Previous page"><i class="fa-solid fa-chevron-left"></i></button><span id="pgi">– / –</span>
+      <button id="next" aria-label="Next page"><i class="fa-solid fa-chevron-right"></i></button>
+      <button id="zo" aria-label="Zoom out"><i class="fa-solid fa-magnifying-glass-minus"></i></button><span id="zi">140%</span>
+      <button id="zin" aria-label="Zoom in"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+    </div>
+    <div id="vp"><div id="stack"><canvas id="pc"></canvas><canvas id="sg"></canvas><canvas id="an"></canvas></div></div>
+  </div>
+  <aside id="right">
+    <h3>Layout analysis</h3>
+    <div id="sum" class="empty"></div>
+    <div id="segs"></div>
+  </aside>
+</div>
+ 
+<script>
+const $=id=>document.getElementById(id);
+const COL={Header:"#ff4d4f",Paragraph:"#3b82f6",Table:"#22c55e"};
+function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(toast.t);toast.t=setTimeout(()=>t.style.display="none",4500)}
+ 
+/* =============== PHASE 1: 3D INTRO =============== */
+let renderer,raf,state="idle",t0=0,scene,cam,catO,holo,rings=[];
+const fileIn=$("file");
+try{
+  renderer=new THREE.WebGLRenderer({canvas:$("c3d"),antialias:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  build3D();raf=requestAnimationFrame(tick);
+}catch(e){console.error(e);$("c3d").style.display="none";$("hintTxt").textContent="3D is unavailable on this device.";$("arrive").style.display="flex";toast("WebGL not available – using the plain file picker.")}
+ 
+function M(c,r=.8,e=0){return new THREE.MeshStandardMaterial({color:c,roughness:r,emissive:e})}
+function box(w,h,d,m,x,y,z,p){const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);o.position.set(x,y,z);o.castShadow=o.receiveShadow=true;(p||scene).add(o);return o}
+function build3D(){
+  scene=new THREE.Scene();scene.background=new THREE.Color(0x0b0e1a);scene.fog=new THREE.Fog(0x0b0e1a,5,24);
+  cam=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,.1,60);cam.position.set(0,1.6,10);
+  renderer.setSize(innerWidth,innerHeight);
+  const wall=M(0x2a3350,.95);
+  box(12,.2,32,M(0x5a4636,.7),0,-.1,-2);box(12,.2,32,wall,0,4.1,-2);box(12,4,.2,wall,0,2,-14);box(12,4,.2,wall,0,2,14);
+  box(.2,4,32,wall,-6,2,-2);box(.2,4,32,wall,6,2,-2);box(5,.03,14,M(0x7a2e3a),0,.02,-3);
+  box(1.4,.8,3.2,M(0x3c6e71),-4.6,.4,3);box(.3,1.2,3.2,M(0x3c6e71),-5.3,.9,3);
+  box(.6,3,4,M(0x3b2a1e),5.6,1.5,-4);
+  ["#d9480f","#1c7ed6","#2f9e44","#ae3ec9","#f59f00"].forEach((c,i)=>box(.1,.5,.5,M(c),5.25,.6+(i%2)*1.1,-5.4+i*.45));
+  [-2,-8].forEach(z=>{const w=new THREE.Mesh(new THREE.PlaneGeometry(3,1.8),new THREE.MeshBasicMaterial({color:0x1b3a6b}));w.position.set(-5.88,2.2,z);w.rotation.y=Math.PI/2;scene.add(w)});
+  box(.5,.4,.5,M(0x8d5524),4.6,.2,6,scene);const pl=new THREE.Mesh(new THREE.SphereGeometry(.6,16,12),M(0x2f9e44));pl.position.set(4.6,.9,6);pl.castShadow=true;scene.add(pl);
+  scene.add(new THREE.AmbientLight(0x6070a0,.55));
+  [[0,3.6,4],[0,3.6,-4]].forEach(p=>{const l=new THREE.PointLight(0xffd9a0,1,22);l.position.set(...p);l.castShadow=true;l.shadow.mapSize.set(1024,1024);scene.add(l)});
+  const cy=new THREE.PointLight(0x2ec4d6,1.6,9);cy.position.set(0,2.2,-9.4);scene.add(cy);
+  // hologram desk
+  box(3.4,.9,1.3,M(0x1c2233),0,.45,-10);box(3.4,.04,1.3,M(0x0a2a3a,.3,0x0a6a8a),0,.92,-10);
+  const c=document.createElement("canvas");c.width=512;c.height=256;const x=c.getContext("2d");
+  x.fillStyle="rgba(20,120,140,.35)";x.fillRect(0,0,512,256);x.strokeStyle="#2ec4d6";x.lineWidth=6;x.strokeRect(6,6,500,244);
+  x.fillStyle="#bff6ff";x.font="bold 54px Inter,sans-serif";x.textAlign="center";x.shadowColor="#2ec4d6";x.shadowBlur=20;
+  x.fillText("UPLOAD PDF",256,125);x.font="26px Inter,sans-serif";x.fillText("document terminal",256,175);
+  holo=new THREE.Mesh(new THREE.PlaneGeometry(2.6,1.3),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(c),transparent:true,side:THREE.DoubleSide}));
+  holo.position.set(0,2.1,-10.2);scene.add(holo);
+  [.9,.6].forEach(r=>{const g=new THREE.Mesh(new THREE.TorusGeometry(r,.02,8,48),new THREE.MeshBasicMaterial({color:0x2ec4d6}));g.rotation.x=Math.PI/2;g.position.set(0,1.2,-10);scene.add(g);rings.push(g)});
+  catO=makeCat();catO.g.position.set(1.1,0,7.4);scene.add(catO.g);
+}
+function makeCat(){
+  const g=new THREE.Group(),m=M(0xe8a25a,.9),d=M(0x222222),legs=[];
+  box(.5,.4,1,m,0,.6,0,g);box(.4,.36,.36,m,0,.9,-.6,g);
+  [-1,1].forEach(s=>{const e=new THREE.Mesh(new THREE.ConeGeometry(.09,.18,4),m);e.position.set(s*.13,1.17,-.6);g.add(e);box(.06,.06,.02,d,s*.1,.93,-.79,g)});
+  box(.08,.06,.02,M(0xff8fa3),0,.86,-.79,g);
+  [[-.17,-.35],[.17,-.35],[-.17,.35],[.17,.35]].forEach(([x,z])=>{const p=new THREE.Group();p.position.set(x,.4,z);box(.12,.4,.12,m,0,-.2,0,p);g.add(p);legs.push(p)});
+  const tail=new THREE.Group();tail.position.set(0,.7,.5);box(.08,.55,.08,m,0,.27,0,tail);tail.rotation.x=.4;g.add(tail);
+  return{g,legs,tail};
+}
+function tick(t){
+  raf=requestAnimationFrame(tick);const T=t/1000;
+  rings.forEach((r,i)=>r.rotation.z=T*(i?-1.4:1));holo.position.y=2.1+Math.sin(T*2)*.05;
+  catO.tail.rotation.z=Math.sin(T*(state==="walking"?9:5))*.5;
+  if(state==="idle"){cam.position.x=Math.sin(T*.5)*.3;cam.lookAt(0,1.3,-10)}
+  if(state==="walking"){
+    const p=Math.min(1,(t-t0)/6500),e=p<.5?2*p*p:1-Math.pow(-2*p+2,2)/2;
+    cam.position.set(0,1.6+Math.sin(T*9)*.04,10-16.4*e);cam.lookAt(0,1.3,-10);
+    catO.g.position.set(1.1,Math.abs(Math.sin(T*8))*.08,cam.position.z-2.6);
+    catO.legs.forEach((l,i)=>l.rotation.x=Math.sin(T*16+(i%2?Math.PI:0))*.8);
+    if(p>=1)arrive();
+  }
+  renderer.render(scene,cam);
+}
+function arrive(){
+  state="arrived";catO.legs.forEach(l=>l.rotation.x=0);
+  $("hintTxt").textContent="You reached the terminal. Choose a PDF to begin.";$("arrive").style.display="flex";
+  try{fileIn.click()}catch(e){}
+}
+addEventListener("click",e=>{
+  if(state!=="idle"||!renderer||e.target.closest("#studio"))return;
+  state="walking";t0=performance.now();$("hintTxt").textContent="Follow the cat…";
+});
+addEventListener("resize",()=>{if(!renderer)return;renderer.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()});
+$("arrive").onclick=e=>{e.stopPropagation();fileIn.click()};
+fileIn.addEventListener("cancel",()=>toast("No file selected. Use the button to pick a PDF."));
+ 
+/* =============== PHASE 2: STUDIO =============== */
+pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+let doc=null,pageNum=1,curPage=0,scale=1.4,vp=null,segs={},store={},undo=[],tool="pen",sel=-1,fname="document";
+const pc=$("pc"),sg=$("sg"),an=$("an"),px=pc.getContext("2d"),sx=sg.getContext("2d"),ax=an.getContext("2d");
+ 
+fileIn.onchange=async()=>{
+  const f=fileIn.files[0];
+  if(!f)return toast("No file selected.");
+  if(f.type!=="application/pdf"&&!/\.pdf$/i.test(f.name))return toast("That is not a PDF. Please choose a .pdf file.");
+  try{
+    const buf=await f.arrayBuffer();doc=await pdfjsLib.getDocument({data:buf}).promise;
+    fname=f.name.replace(/\.pdf$/i,"");pageNum=1;curPage=0;segs={};store={};undo=[];
+    openStudio();await render();
+  }catch(err){console.error(err);toast("Could not read this PDF ("+(err.message||"corrupt or password-protected")+").")}
+  fileIn.value="";
+};
+function openStudio(){
+  const s=$("studio");if(s.style.display==="grid")return;
+  s.style.display="grid";$("intro").style.opacity=0;$("c3d").style.transition="opacity 1s";$("c3d").style.opacity=0;
+  requestAnimationFrame(()=>s.style.opacity=1);
+  setTimeout(()=>{cancelAnimationFrame(raf);$("intro").style.display="none";$("c3d").style.display="none"},1000);
+}
+$("newf").onclick=()=>fileIn.click();
+ 
+async function render(){
+  if(!doc)return;
+  saveAnn();
+  const pg=await doc.getPage(pageNum);vp=pg.getViewport({scale});
+  [pc,sg,an].forEach(c=>{c.width=vp.width;c.height=vp.height});
+  try{await pg.render({canvasContext:px,viewport:vp}).promise}catch(e){return toast("Page render failed.")}
+  curPage=pageNum;await restoreAnn();
+  segs[pageNum]=await analyze(pg);
+  drawSeg();list();
+  $("pgi").textContent=pageNum+" / "+doc.numPages;$("zi").textContent=Math.round(scale/1.4*140)+"%";
+}
+const changePage=d=>{if(doc&&pageNum+d>=1&&pageNum+d<=doc.numPages){pageNum+=d;undo=[];render()}};
+$("prev").onclick=()=>changePage(-1);$("next").onclick=()=>changePage(1);
+$("zin").onclick=()=>{scale=Math.min(3,scale+.2);render()};$("zo").onclick=()=>{scale=Math.max(.6,scale-.2);render()};
+addEventListener("resize",()=>{/* canvases are pixel-sized; viewport scrolls */});
+ 
+function saveAnn(){if(curPage&&an.width)store[curPage]=an.toDataURL()}
+function restoreAnn(){return new Promise(r=>{ax.clearRect(0,0,an.width,an.height);const d=store[pageNum];
+  if(!d)return r();const i=new Image();i.onload=()=>{ax.drawImage(i,0,0,an.width,an.height);r()};i.src=d})}
+ 
+/* ---------- layout segmentation ---------- */
+async function analyze(pg){
+  const tc=await pg.getTextContent();
+  const it=tc.items.filter(t=>t.str.trim()).map(t=>{const m=pdfjsLib.Util.transform(vp.transform,t.transform),h=Math.hypot(m[2],m[3]);
+    return{s:t.str,x:m[4],y:m[5]-h,w:t.width*vp.scale,h,b:m[5]}}).sort((a,b)=>a.b-b.b);
+  if(!it.length)return[];
+  const lines=[];
+  it.forEach(t=>{const L=lines[lines.length-1];if(L&&Math.abs(L.b-t.b)<t.h*.5){L.it.push(t);L.h=Math.max(L.h,t.h)}else lines.push({b:t.b,h:t.h,it:[t]})});
+  lines.forEach(L=>{
+    L.it.sort((a,b)=>a.x-b.x);L.cells=[];
+    L.it.forEach(t=>{const c=L.cells[L.cells.length-1];
+      if(c&&t.x-c.x1<L.h*1.2){c.s+=(t.x-c.x1>L.h*.15?" ":"")+t.s;c.x1=t.x+t.w}else L.cells.push({s:t.s,x0:t.x,x1:t.x+t.w})});
+    L.x0=L.it[0].x;L.x1=Math.max(...L.it.map(t=>t.x+t.w));L.y0=Math.min(...L.it.map(t=>t.y));L.y1=L.y0+L.h;L.tab=L.cells.length>=3;
+  });
+  const hs=lines.filter(l=>!l.tab).map(l=>l.h).sort((a,b)=>a-b),med=hs.length?hs[hs.length>>1]:lines[0].h;
+  const blocks=[];
+  lines.forEach(L=>{const B=blocks[blocks.length-1];
+    if(B&&B.tab===L.tab&&(L.tab||Math.abs(B.h-L.h)<2.5)&&L.y0-B.y1<L.h*.9){B.lines.push(L);B.y1=L.y1;B.x0=Math.min(B.x0,L.x0);B.x1=Math.max(B.x1,L.x1)}
+    else blocks.push({tab:L.tab,h:L.h,x0:L.x0,x1:L.x1,y0:L.y0,y1:L.y1,lines:[L]})});
+  return blocks.map(b=>{
+    let type="Paragraph";
+    if(b.tab&&b.lines.length>=2)type="Table";else if(!b.tab&&b.h>med*1.3&&b.lines.length<=3)type="Header";
+    return{type,x:b.x0-4,y:b.y0-3,w:b.x1-b.x0+8,h:b.y1-b.y0+6,
+      text:b.lines.map(l=>l.cells.map(c=>c.s).join(" ")).join(" "),rows:type==="Table"?b.lines.map(l=>l.cells.map(c=>c.s)):null};
+  });
+}
+function drawSeg(){
+  sx.clearRect(0,0,sg.width,sg.height);if(!$("showSeg").checked)return;
+  (segs[pageNum]||[]).forEach((s,i)=>{sx.fillStyle=COL[s.type]+(i===sel?"55":"22");sx.fillRect(s.x,s.y,s.w,s.h);
+    sx.strokeStyle=COL[s.type];sx.lineWidth=i===sel?3:1.5;sx.strokeRect(s.x,s.y,s.w,s.h)});
+}
+function list(){
+  const a=segs[pageNum]||[],box=$("segs");box.innerHTML="";
+  const n=t=>a.filter(s=>s.type===t).length;
+  $("sum").textContent=a.length?`${n("Header")} headers · ${n("Paragraph")} paragraphs · ${n("Table")} tables`:"No selectable text found on this page (scanned image?). Annotation tools still work.";
+  a.forEach((s,i)=>{
+    const d=document.createElement("div");d.className="seg"+(i===sel?" sel":"");d.style.borderLeftColor=COL[s.type];
+    d.innerHTML=`<div class="h"><span>${s.type}</span></div><small></small>`;d.querySelector("small").textContent=s.text;
+    if(s.rows){const b=document.createElement("button");b.innerHTML='<i class="fa-solid fa-download"></i>CSV';b.onclick=e=>{e.stopPropagation();csv([s.rows],fname+"-p"+pageNum+"-table"+(i+1)+".csv")};d.querySelector(".h").append(b)}
+    d.onclick=()=>{sel=sel===i?-1:i;drawSeg();list();$("vp").scrollTo({top:s.y-80,behavior:"smooth"})};
+    box.append(d);
+  });
+}
+$("showSeg").onchange=drawSeg;
+ 
+/* ---------- annotation tools ---------- */
+document.querySelectorAll(".tool").forEach(b=>b.onclick=()=>{tool=b.dataset.t;document.querySelectorAll(".tool").forEach(x=>x.classList.toggle("on",x===b))});
+let down=null,snap=null,pts=[];
+const P=e=>{const r=an.getBoundingClientRect();return[e.clientX-r.left,e.clientY-r.top]};
+function pushUndo(){undo.push(ax.getImageData(0,0,an.width,an.height));if(undo.length>25)undo.shift()}
+an.onpointerdown=e=>{
+  if(!doc)return;an.setPointerCapture(e.pointerId);const p=P(e);pushUndo();
+  if(tool==="stamp"){stamp(p);return}
+  down=p;pts=[p];snap=ax.getImageData(0,0,an.width,an.height);
+  if(tool==="pen"||tool==="erase"){ax.beginPath();ax.moveTo(...p);ax.lineTo(p[0]+.1,p[1])}
+  style();if(tool==="pen"||tool==="erase")ax.stroke();
+};
+function style(){
+  const w=+$("size").value;ax.lineCap=ax.lineJoin="round";ax.globalCompositeOperation="source-over";
+  if(tool==="pen"){ax.strokeStyle=$("color").value;ax.lineWidth=w}
+  if(tool==="hl"){ax.strokeStyle="rgba(255,255,0,0.4)";ax.lineWidth=w*3+8;ax.lineCap="butt"}
+  if(tool==="erase"){ax.globalCompositeOperation="destination-out";ax.lineWidth=w*3+6}
+  if(tool==="redact")ax.fillStyle="#000000";
+}
+an.onpointermove=e=>{
+  if(!down)return;const p=P(e);pts.push(p);
+  if(tool==="pen"||tool==="erase"){ax.lineTo(...p);ax.stroke()}
+  else if(tool==="hl"){ax.putImageData(snap,0,0);style();ax.beginPath();pts.forEach((q,i)=>i?ax.lineTo(...q):ax.moveTo(...q));ax.stroke()}
+  else if(tool==="redact"){ax.putImageData(snap,0,0);ax.fillRect(down[0],down[1],p[0]-down[0],p[1]-down[1])}
+};
+const end=()=>{if(down){down=null;ax.globalCompositeOperation="source-over";saveAnn()}};
+an.onpointerup=end;an.onpointercancel=end;
+function stamp(p){
+  const t=$("stamp").value,c={APPROVED:"#16a34a",REJECTED:"#dc2626",CONFIDENTIAL:"#dc2626",DRAFT:"#2563eb",REVIEWED:"#9333ea"}[t];
+  ax.save();ax.translate(...p);ax.rotate(-.26);ax.font="800 34px Inter,sans-serif";ax.textAlign="center";ax.textBaseline="middle";
+  const w=ax.measureText(t).width+28;ax.strokeStyle=ax.fillStyle=c;ax.lineWidth=5;ax.globalAlpha=.85;ax.strokeRect(-w/2,-28,w,56);ax.fillText(t,0,2);ax.restore();saveAnn();
+}
+$("undo").onclick=()=>{const s=undo.pop();if(s){ax.putImageData(s,0,0);saveAnn()}};
+$("clear").onclick=()=>{if(!doc)return;pushUndo();ax.clearRect(0,0,an.width,an.height);saveAnn()};
+ 
+/* ---------- export ---------- */
+function flat(){const c=document.createElement("canvas");c.width=pc.width;c.height=pc.height;const x=c.getContext("2d");x.drawImage(pc,0,0);x.drawImage(an,0,0);return c}
+function save(url,name){const a=document.createElement("a");a.href=url;a.download=name;a.click()}
+$("exPng").onclick=()=>{if(!doc)return toast("Open a PDF first.");save(flat().toDataURL("image/png"),`${fname}-p${pageNum}.png`)};
+$("exPdf").onclick=()=>{
+  if(!doc)return toast("Open a PDF first.");if(!window.jspdf)return toast("PDF library did not load. Check your internet connection.");
+  const c=flat(),{jsPDF}=window.jspdf,p=new jsPDF({unit:"px",format:[c.width,c.height],orientation:c.width>c.height?"l":"p"});
+  p.addImage(c.toDataURL("image/png"),"PNG",0,0,c.width,c.height);p.save(`${fname}-p${pageNum}.pdf`);
+};
+function csv(tables,name){
+  const q=v=>'"'+String(v).replace(/"/g,'""')+'"';
+  const txt=tables.map(t=>t.map(r=>r.map(q).join(",")).join("\n")).join("\n\n");
+  save(URL.createObjectURL(new Blob(["\ufeff"+txt],{type:"text/csv"})),name);
+}
+$("exCsv").onclick=()=>{
+  const t=(segs[pageNum]||[]).filter(s=>s.rows).map(s=>s.rows);
+  if(!t.length)return toast("No tables detected on this page.");csv(t,`${fname}-p${pageNum}-tables.csv`);
+};
+</script>
+</body>
+</html>
+ 
